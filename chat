@@ -1,0 +1,111 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <stdbool.h>
+
+int establish_connection(int socket_fd, const struct addrinfo *res, char *port, char *ip);
+char *retrieve_local_ip(int *result);
+
+int main(void) {
+    struct addrinfo hints;
+    struct addrinfo *res;
+    char port[5] = "9002";
+
+    memset(&hints, 0, sizeof hints); // Инициализация структуры нулями
+    //char *ip = "255.255.255.255";
+
+    int ip_status = 0;
+    char *ip = retrieve_local_ip(&ip_status);
+    //char *ip = "192.168.98.129" //
+    if (ip_status != 0 && ip == NULL) {
+        fprintf(stderr, "Ошибка при разрешении IP адреса localhost\n");
+        return 1;
+    }
+
+    printf("%s\n", ip);
+    getaddrinfo(ip, port, &hints, &res);
+
+    char response[7] = "";
+    int iteration = 0;
+    while (true) {
+        iteration++;
+        printf("Итерация %d\n", iteration);
+
+        char message[7] = "";
+
+        int socket_fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+        if (socket_fd == -1) {
+            perror("socket");
+            return 1;
+        }
+        if (establish_connection(socket_fd, res, port, ip) != 0) {
+            perror("connect");
+            return 1;
+        }
+        //sleep(10); // Проверка таймаута на стороне сервера
+        printf("Введите сообщение для отправки серверу (максимум 7 символов): ");
+        scanf("%7s", message);
+        int bytes_sent = send(socket_fd, message, strlen(message), 0);
+        if (bytes_sent == -1) {
+            perror("send");
+            return 1;
+        }
+        printf("Отправлено байт в сокет: %d\n", bytes_sent);
+        // quit - команда для выхода из программы
+        if (strcmp(message, "quit") != 0) {
+            int bytes_received = recv(socket_fd, response, sizeof(response), 0);
+            if (bytes_received == -1) {
+                perror("recv");
+                return 1;
+            }
+            printf("Ответ сервера: %s \n", response);
+            close(socket_fd);
+        } else {
+            printf("Выход из программы, так как отправлена команда завершения работы сервера и клиента");
+            close(socket_fd);
+            break;
+        }
+    }
+
+    freeaddrinfo(res);
+    free(ip);
+    return 0;
+}
+
+char *retrieve_local_ip(int *result) {
+    char hostname_buffer[256];
+    // Получаем IP адрес localhost
+    if (gethostname(hostname_buffer, sizeof(hostname_buffer)) == -1) {
+        perror("gethostname");
+        *result = 1;
+    }
+    const struct hostent *host_entry = gethostbyname(hostname_buffer);
+    if (host_entry == NULL) {
+        perror("gethostbyname");
+        *result = 1;
+        return NULL;
+    }
+    char *local_ip_address = inet_ntoa(*((struct in_addr*)host_entry->h_addr_list[0]));
+    char *ip_address = malloc(sizeof(*ip_address) + 1);
+    if (ip_address == NULL) {
+        perror("malloc");
+        *result = 1;
+        return NULL;
+    }
+    memccpy(ip_address, local_ip_address, 0, strlen(local_ip_address));
+    *result = 0;
+    return ip_address;
+}
+
+int establish_connection(int socket_fd, const struct addrinfo *res, char *port, char *ip) {
+    printf("%s %s:%s%s", "Попытка подключения к ", ip, port, "\n");
+    if (connect(socket_fd, res->ai_addr, res->ai_addrlen) == -1) {
+        perror("Ошибка соединения");
+        return 1;
+    }
+    printf("Подключение к серверу успешно установлено \n");
+    return 0;
+}
